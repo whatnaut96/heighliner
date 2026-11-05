@@ -1,6 +1,7 @@
 import {  StatusJournal, StatusPayload, } from './stellartel.types.ts';
 
 
+const CLICKHOUSE_URL = Deno.env.get("CLICKHOUSE_URL");
 
 
 export async function stellartelHandle(req: Request): Promise<Response> {
@@ -21,7 +22,7 @@ export async function statusHandle(status: StatusJournal): Promise<Response> {
     being_interdicted: (status.Flags >> 23) & 1,
     legal_state: status.LegalState,
   };
-const CLICKHOUSE_URL = Deno.env.get("CLICKHOUSE_URL");
+
   const query = "INSERT INTO stellartel.status_metrics FORMAT JSONEachRow";
   const url = `${CLICKHOUSE_URL}?query=${encodeURIComponent(query)}`
   
