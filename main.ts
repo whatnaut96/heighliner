@@ -1,4 +1,4 @@
-import {stellartelHandle} from '@/stellartel/handler.ts';
+import { stellartelHandle } from '@/stellartel/handler.ts';
 
 const stellartelPattern = new URLPattern({pathname: "/api/stellartel"});;
 
