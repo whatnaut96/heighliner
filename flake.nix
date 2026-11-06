@@ -11,12 +11,14 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        unstablePkgs = nixpkgs-unstable.legacyPackages.${system};
       in
       {
         devShells.default = pkgs.mkShell {
           buildInputs = [
-            unstablePkgs.deno
+            pkgs.elixir
+            pkgs.erlang_28
+            pkgs.rebar3
+            pkgs.elixir-ls
           ];
         };
 
