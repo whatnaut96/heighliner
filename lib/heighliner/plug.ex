@@ -21,14 +21,13 @@ defmodule Heighliner.Plug do
           |> String.downcase()
           |> String.to_atom()
 
-        Logger.info(event_atom)
+        result = StellarTel.Handler.handle_journal(event_atom, event)
 
-        case event_atom do
-          :status ->
-            Logger.debug("status payload received")
+        case result do
+          :ok -> send_resp(conn, 200, "journal processed successfully")
+          {:error, :reason} -> send_resp(conn, 400, "#{Atom.to_string(:reason)}")
+          :internal_error -> send_resp(conn, 500, "internal error")
         end
-
-        send_resp(conn, 200, "")
 
       {:error, reason} ->
         Logger.error("failed to read the body error=#{reason}")
