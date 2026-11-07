@@ -24,9 +24,14 @@ defmodule Heighliner.Plug do
         result = StellarTel.Handler.handle_journal(event_atom, event)
 
         case result do
-          :ok -> send_resp(conn, 200, "journal processed successfully")
-          {:error, :reason} -> send_resp(conn, 400, "#{Atom.to_string(:reason)}")
-          :internal_error -> send_resp(conn, 500, "internal error")
+          :ok ->
+            send_resp(conn, 200, "journal processed successfully")
+
+          {:error, :event_type_not_supported} ->
+            send_resp(conn, 423, "#{event["event"]} not supported")
+
+          :internal_error ->
+            send_resp(conn, 500, "internal error")
         end
 
       {:error, reason} ->
