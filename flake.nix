@@ -1,5 +1,5 @@
 {
-  description = "Flake for beacon cross-compilation and development";
+  description = "Flake for heighliner development";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/26.05";
@@ -19,10 +19,8 @@
             beamPkgs.elixir_1_20
             beamPkgs.erlang
             pkgs.rebar3
-            pkgs.beamMinimal29Packages.elixir-ls
           ];
         };
-
       }
     );
 }
