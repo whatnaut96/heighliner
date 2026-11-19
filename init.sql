@@ -43,6 +43,8 @@ CREATE TABLE faction_states (
     name TEXT UNIQUE NOT NULL
 );
 
+INSERT INTO faction_states (name) VALUES ('None');
+
 CREATE TABLE happiness_levels(
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
@@ -61,7 +63,7 @@ CREATE TABLE factions (
 
 CREATE TABLE faction_state_bridge(
     id SERIAL PRIMARY KEY,
-    faction_id INT REFERENCES factions(id),
+    faction_id INT UNIQUE REFERENCES factions(id),
     state_id INT REFERENCES faction_states(id),
     last_updated bigint NOT NULL
 );
@@ -88,7 +90,8 @@ CREATE TABLE powers_system_bridge(
     id SERIAL PRIMARY KEY,
     power_id INT REFERENCES powers(id),
     system_id BIGINT REFERENCES systems(id),
-    last_updated bigint NOT NULL
+    last_updated bigint NOT NULL,
+    UNIQUE(power_id, system_id)
 );
 
 CREATE TABLE commodity_categories(
@@ -150,4 +153,3 @@ CREATE TABLE faction_system_bridge(
     in_control BOOLEAN NOT NULL,
     last_updated bigint NOT NULL
 );
-
