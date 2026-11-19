@@ -11,14 +11,15 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        beamPkgs = pkgs.beam29Packages;
       in
       {
         devShells.default = pkgs.mkShell {
           buildInputs = [
-            pkgs.elixir
-            pkgs.erlang_28
+            beamPkgs.elixir_1_20
+            beamPkgs.erlang
             pkgs.rebar3
-            pkgs.elixir-ls
+            pkgs.beamMinimal29Packages.elixir-ls
           ];
         };
 

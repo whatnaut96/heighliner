@@ -24,7 +24,8 @@ defmodule Heighliner.MixProject do
     [
       {:plug_cowboy, "~>2.9.0"},
       {:bandit, "~>1.14.1"},
-      {:req, "~>0.7.5"}
+      {:req, "~>0.7.5"},
+      {:postgrex, "~>0.22.4"}
     ]
   end
 end

@@ -39,4 +39,31 @@ defmodule Heighliner.Plug do
         send_resp(conn, 400, "failed to read the body: #{reason}")
     end
   end
+
+  post "/synco" do
+    payload_atom =
+      Plug.Conn.Query.decode(conn.query_string)["type"]
+      |> String.to_atom()
+
+    case read_full_body(conn) do
+      {:ok, body, conn} ->
+        case Synco.Handler.handle_payload(payload_atom, body) do
+          :ok -> send_resp(conn, 200, "foo")
+        end
+    end
+  end
+
+  def read_full_body(conn, acc \\ "") do
+    case Plug.Conn.read_body(conn) do
+      {:ok, body, conn} ->
+        {:ok, acc <> body, conn}
+
+      {:more, partial_body, conn} ->
+        read_full_body(conn, acc <> partial_body)
+
+      {:error, reason} ->
+        Logger.error("failed to read the body error=#{reason}")
+        {:error, reason}
+    end
+  end
 end

@@ -1,92 +1,74 @@
 defmodule StellarTel.Handler do
   require Logger
-  import Bitwise
 
-  @legal_states %{
-    "Clean" => 1,
-    "IllegalCargo" => 2,
-    "Speeding" => 3,
-    "Wanted" => 4,
-    "Hostile" => 5,
-    "PassengerWanted" => 6,
-    "Warrant" => 7,
-    "Allied" => 8,
-    "Thargoid" => 9
-  }
+  def handle_journal(:fsdjump, event) do
+    case Postgrex.transaction(StellarTel.Postgres, fn conn ->
+           system_upsert_query = """
+             INSERT INTO systems values (
+               $1,
+               ST_SetSRID(ST_MakePoint($2, $3, $4), 0),
+               $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+             ) ON CONFLICT (id)
+               DO UPDATE SET
+                id = EXCLUDED.id,
+                allegiance_id = EXCLUDED.allegiance_id,
+                primary_economy_id = EXCLUDED.primary_economy_id,
+                secondary_economy_id = EXCLUDED.secondary_economy_id,
+                government_id = EXCLUDED.government_id,
+                population = EXCLUDED.population,
+                controlling_power_id = EXCLUDED.controlling_power_id,
+                power_play_state_id = EXCLUDED.power_play_state_id,
+                conflicts = EXCLUDED.conflicts,
+                last_updated = EXCLUDED.last_updated
+           """
 
-  def handle_journal(:status, entry) do
-    flags = entry["Flags"]
+           allegiance_id = get_or_create_id(conn, "allegiances", event["SystemAllegiance"])
 
-    %{
-      mass_locked: mass_locked,
-      low_fuel: low_fuel,
-      overheating: overheating,
-      in_danger: in_danger,
-      being_interdicted: being_interdicted
-    } = parse_flags(flags)
+           primary_economy_id =
+             get_or_create_id(conn, "economy_types", event["SystemEconomy_Localised"])
 
-    mass_locked_metric_string = """
-    # help stellartel_mass_locked signals if the ship is masslocked (0 = false, 1 = true)
-    # type stellartel_mass_locked gauge
-    stellartel_mass_locked{} #{mass_locked}
-    """
+           secondary_economy_id =
+             get_or_create_id(conn, "economy_types", event["SystemSecondEconomy_Localised"])
 
-    low_fuel_metric_string = """
-    # help stellartel_low_fuel signals if the ship is low on fuel (0 = false, 1 = true)
-    # type stellartel_low_fuel gauge
-    stellartel_low_fuel{} #{low_fuel}
-    """
+           government_id =
+             get_or_create_id(conn, "government_types", event["SystemGovernment_Localised"])
 
-    overheating_metric_string = """
-    # help stellartel_overheating signals if the ship is overheating (0 = false, 1 = true)
-    # type stellartel_overheating gauge
-    stellartel_overheating{} #{overheating}
-    """
+           body_type_id = get_or_create_id(conn, "body_types", event["BodyType"])
 
-    in_danger_metric_string = """
-    # help stellartel_in_danger signals if the ship is in danger (0 = false, 1 = true)
-    # type stellartel_in_danger gauge
-    stellartel_in_danger{} #{in_danger}
-    """
+           controlling_power_id = get_or_create_id(conn, "powers", event["ControllingPower"])
 
-    being_interdicted_metric_string = """
-    # help stellartel_being_interdicted signals if the ship is being interdicted (0 = false, 1 = true)
-    # type stellartel_being_interdicted gauge
-    stellartel_being_interdicted{} #{being_interdicted}
-    """
+           powerplay_state_id =
+             get_or_create_id(conn, "powerplay_states", event["PowerplayState"])
 
-    legal_state = entry["legalstate"]
+           [star_pos_x, star_pos_y, star_pos_z] = event["StarPos"]
 
-    legal_state_metric_string = """
-    # help stellartel_legal_state the legal status of the ship (1 = clean, 2 = illegalcargo, 3 = speeding, 4 = wanted, 5 = hostile, 6 = passengerwanted, 7 = warrant, 8 = allied, 9 = thargoid)
-    # type stellartel_legal_state gauge
-    stellartel_legal_state{} #{@legal_states[legal_state]}
-    """
-
-    # combine all metrics into a single body payload
-    body = """
-    #{mass_locked_metric_string}
-    #{low_fuel_metric_string}
-    #{overheating_metric_string}
-    #{in_danger_metric_string}
-    #{being_interdicted_metric_string}
-    #{legal_state_metric_string}
-    """
-
-    url =
-      :heighliner
-      |> Application.fetch_env!(:prometheus_endpoint)
-
-    case Req.post(url, body: body, headers: [{"content-type", "text/plain"}]) do
-      {:ok, %Req.Response{status: 204, body: _response_body}} ->
+           Postgrex.query!(
+             conn,
+             system_upsert_query,
+             [
+               event["SystemAddress"],
+               star_pos_x,
+               star_pos_y,
+               star_pos_z,
+               event["Body"],
+               allegiance_id,
+               primary_economy_id,
+               secondary_economy_id,
+               government_id,
+               body_type_id,
+               event["Population"],
+               controlling_power_id,
+               powerplay_state_id,
+               JSON.encode!(event["Conflicts"]),
+               System.system_time(:millisecond)
+             ]
+           )
+         end) do
+      {:ok, _result} ->
         :ok
 
-      {:ok, %Req.Response{status: status}} ->
-        Logger.error("Failed to push status metrics: got #{status} back from endpoint")
-        :internal_error
-
-      {:error, exception} when is_exception(exception) ->
-        Logger.error("Failed to push status metrics: #{Exception.message(exception)}")
+      {:error, reason} ->
+        Logger.error("route=stellartel Databse error: #{inspect(reason)}")
         :internal_error
     end
   end
@@ -96,33 +78,17 @@ defmodule StellarTel.Handler do
     {:error, :event_type_not_supported}
   end
 
-  defp parse_flags(flags) when is_integer(flags) do
-    mass_locked =
-      bsr(flags, 16)
-      |> band(1)
+  def get_or_create_id(pg_conn, table_name, value) do
+    query =
+      "INSERT INTO #{table_name} (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id"
 
-    low_fuel =
-      bsr(flags, 19)
-      |> band(1)
+    case Postgrex.query(pg_conn, query, [value]) do
+      {:ok, %Postgrex.Result{rows: [[id]]}} ->
+        id
 
-    overheating =
-      bsr(flags, 20)
-      |> band(1)
-
-    in_danger =
-      bsr(flags, 22)
-      |> band(1)
-
-    being_interdicted =
-      bsr(flags, 23)
-      |> band(1)
-
-    %{
-      mass_locked: mass_locked,
-      low_fuel: low_fuel,
-      overheating: overheating,
-      in_danger: in_danger,
-      being_interdicted: being_interdicted
-    }
+      {:error, reason} ->
+        Logger.error("route=stellartel Could not get id from #{table_name}: #{reason}")
+        {:error, reason}
+    end
   end
 end
