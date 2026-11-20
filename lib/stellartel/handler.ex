@@ -23,23 +23,50 @@ defmodule StellarTel.Handler do
                 last_updated = EXCLUDED.last_updated
            """
 
-           allegiance_id = get_or_create_id(conn, "allegiances", event["SystemAllegiance"])
+           allegiance_id =
+             case get_or_create_id(conn, "allegiances", event["SystemAllegiance"]) do
+               {:error, reason} ->
+                 Postgrex.rollback(conn, reason)
+
+               id ->
+                 id
+             end
 
            primary_economy_id =
-             get_or_create_id(conn, "economy_types", event["SystemEconomy_Localised"])
+             case get_or_create_id(conn, "economy_types", event["SystemEconomy_Localised"]) do
+               {:error, reason} -> Postgrex.rollback(conn, reason)
+               id -> id
+             end
 
            secondary_economy_id =
-             get_or_create_id(conn, "economy_types", event["SystemSecondEconomy_Localised"])
+             case get_or_create_id(conn, "economy_types", event["SystemSecondEconomy_Localised"]) do
+               {:error, reason} -> Postgrex.rollback(conn, reason)
+               id -> id
+             end
 
            government_id =
-             get_or_create_id(conn, "government_types", event["SystemGovernment_Localised"])
+             case get_or_create_id(conn, "government_types", event["SystemGovernment_Localised"]) do
+               {:error, reason} -> Postgrex.rollback(conn, reason)
+               id -> id
+             end
 
-           body_type_id = get_or_create_id(conn, "body_types", event["BodyType"])
+           body_type_id =
+             case get_or_create_id(conn, "body_types", event["BodyType"]) do
+               {:error, reason} -> Postgrex.rollback(conn, reason)
+               id -> id
+             end
 
-           controlling_power_id = get_or_create_id(conn, "powers", event["ControllingPower"])
+           controlling_power_id =
+             case get_or_create_id(conn, "powers", event["ControllingPower"]) do
+               {:error, reason} -> Postgrex.rollback(conn, reason)
+               id -> id
+             end
 
            powerplay_state_id =
-             get_or_create_id(conn, "powerplay_states", event["PowerplayState"])
+             case get_or_create_id(conn, "powerplay_states", event["PowerplayState"]) do
+               {:error, reason} -> Postgrex.rollback(conn, reason)
+               id -> id
+             end
 
            [star_pos_x, star_pos_y, star_pos_z] = event["StarPos"]
 
@@ -65,13 +92,14 @@ defmodule StellarTel.Handler do
              ]
            )
 
-          power_ids = event["Powers"]
-          |> Enum.map(fn power_name ->
-            case get_or_create_id(conn, "powers", power_name) do
-              {:error, reason} -> Postgrex.rollback(conn, reason)
-              id -> id
-            end
-          end)
+           power_ids =
+             event["Powers"]
+             |> Enum.map(fn power_name ->
+               case get_or_create_id(conn, "powers", power_name) do
+                 {:error, reason} -> Postgrex.rollback(conn, reason)
+                 id -> id
+               end
+             end)
 
            powers_system_bridge_query = """
              INSERT INTO powers_system_bridge (power_id, system_id, last_updated)
@@ -79,7 +107,11 @@ defmodule StellarTel.Handler do
              ON CONFLICT (power_id, system_id) DO UPDATE SET last_updated = EXCLUDED.last_updated
            """
 
-           Postgrex.query(conn, powers_system_bridge_query, [power_ids, event["SystemAddress"], System.system_time(:millisecond)])
+           Postgrex.query(conn, powers_system_bridge_query, [
+             power_ids,
+             event["SystemAddress"],
+             System.system_time(:millisecond)
+           ])
 
            faction_insert_query = """
             INSERT INTO factions (
@@ -113,80 +145,92 @@ defmodule StellarTel.Handler do
            """
 
            faction_system_bridge_upsert_query = """
-            WITH faction_data AS (
-              SELECT faction_id, in_control
-              FROM UNNEST($1::int[], $4::boolean[]) AS t(faction_id, in_control)
-            ), updated AS (
-              UPDATE faction_system_bridge AS bridge
-              SET in_control = faction_data.in_control, last_updated = $3::bigint
-              FROM faction_data
-              WHERE bridge.faction_id = faction_data.faction_id AND bridge.system_id = $2::bigint
-              RETURNING bridge.faction_id
-            )
-            INSERT INTO faction_system_bridge (faction_id, system_id, in_control, last_updated)
-            SELECT faction_id, $2::bigint, in_control, $3::bigint
-            FROM faction_data
-            WHERE faction_id NOT IN (SELECT faction_id FROM updated)
-            """
+           WITH faction_data AS (
+             SELECT faction_id, in_control
+             FROM UNNEST($1::int[], $4::boolean[]) AS t(faction_id, in_control)
+           ), updated AS (
+             UPDATE faction_system_bridge AS bridge
+             SET in_control = faction_data.in_control, last_updated = $3::bigint
+             FROM faction_data
+             WHERE bridge.faction_id = faction_data.faction_id AND bridge.system_id = $2::bigint
+             RETURNING bridge.faction_id
+           )
+           INSERT INTO faction_system_bridge (faction_id, system_id, in_control, last_updated)
+           SELECT faction_id, $2::bigint, in_control, $3::bigint
+           FROM faction_data
+           WHERE faction_id NOT IN (SELECT faction_id FROM updated)
+           """
 
            if event["Factions"] != [] do
-            prepared =
-              Enum.map(event["Factions"], fn faction ->
-                gov_id = get_or_create_id(conn, "government_types", faction["Government"])
-                happy_id = get_or_create_id(conn, "happiness_levels", faction["Happiness_Localised"])
-                alleg_id = get_or_create_id(conn, "allegiances", faction["Allegiance"])
+             prepared =
+               Enum.map(event["Factions"], fn faction ->
+                 gov_id = get_or_create_id(conn, "government_types", faction["Government"])
 
-                state_name =
-                  case Map.get(faction, "ActiveStates") do
-                    [%{"State" => s} | _] when is_binary(s) and s != "" -> s
-                    _ -> faction["FactionState"]
-                  end
+                 happy_id =
+                   get_or_create_id(conn, "happiness_levels", faction["Happiness_Localised"])
 
-                state_id = get_or_create_id(conn, "faction_states", state_name)
+                 alleg_id = get_or_create_id(conn, "allegiances", faction["Allegiance"])
 
-                in_control = faction["Name"] == event["SystemFaction"]["Name"]
+                 state_name =
+                   case Map.get(faction, "ActiveStates") do
+                     [%{"State" => s} | _] when is_binary(s) and s != "" -> s
+                     _ -> faction["FactionState"]
+                   end
 
-                %{
-                  gov_id: gov_id,
-                  happy_id: happy_id,
-                  alleg_id: alleg_id,
-                  reputation: faction["MyReputation"] || 0.0,
-                  name: faction["Name"],
-                  state_id: state_id,
-                  in_control: in_control
-                }
-              end)
+                 state_id = get_or_create_id(conn, "faction_states", state_name)
 
-            %{rows: id_rows} =
-              Postgrex.query!(
-                conn,
-                faction_insert_query,
-                [
-                  Enum.map(prepared, & &1.gov_id),
-                  Enum.map(prepared, & &1.happy_id),
-                  Enum.map(prepared, & &1.alleg_id),
-                  Enum.map(prepared, & &1.reputation),
-                  List.duplicate(System.system_time(:millisecond), length(prepared)),
-                  Enum.map(prepared, & &1.name)
-                ]
-              )
+                 in_control = faction["Name"] == event["SystemFaction"]["Name"]
 
-            factions_with_ids =
-              Enum.zip_with(prepared, id_rows, fn item, [faction_id] ->
-                Map.put(item, :faction_id, faction_id)
-              end)
+                 %{
+                   gov_id: gov_id,
+                   happy_id: happy_id,
+                   alleg_id: alleg_id,
+                   reputation: faction["MyReputation"] || 0.0,
+                   name: faction["Name"],
+                   state_id: state_id,
+                   in_control: in_control
+                 }
+               end)
 
-            faction_ids = Enum.map(factions_with_ids, & &1.faction_id)
-            state_ids = Enum.map(factions_with_ids, & &1.state_id)
-            in_controls = Enum.map(factions_with_ids, & &1.in_control)
+             %{rows: id_rows} =
+               Postgrex.query!(
+                 conn,
+                 faction_insert_query,
+                 [
+                   Enum.map(prepared, & &1.gov_id),
+                   Enum.map(prepared, & &1.happy_id),
+                   Enum.map(prepared, & &1.alleg_id),
+                   Enum.map(prepared, & &1.reputation),
+                   List.duplicate(System.system_time(:millisecond), length(prepared)),
+                   Enum.map(prepared, & &1.name)
+                 ]
+               )
 
-            Postgrex.query!(conn, faction_state_insert_query, [faction_ids, state_ids, System.system_time(:millisecond)])
+             factions_with_ids =
+               Enum.zip_with(prepared, id_rows, fn item, [faction_id] ->
+                 Map.put(item, :faction_id, faction_id)
+               end)
 
-            Postgrex.query!(
-              conn,
-              faction_system_bridge_upsert_query,
-              [faction_ids, event["SystemAddress"], System.system_time(:millisecond), in_controls]
-            )
+             faction_ids = Enum.map(factions_with_ids, & &1.faction_id)
+             state_ids = Enum.map(factions_with_ids, & &1.state_id)
+             in_controls = Enum.map(factions_with_ids, & &1.in_control)
+
+             Postgrex.query!(conn, faction_state_insert_query, [
+               faction_ids,
+               state_ids,
+               System.system_time(:millisecond)
+             ])
+
+             Postgrex.query!(
+               conn,
+               faction_system_bridge_upsert_query,
+               [
+                 faction_ids,
+                 event["SystemAddress"],
+                 System.system_time(:millisecond),
+                 in_controls
+               ]
+             )
            end
          end) do
       {:ok, _result} ->
@@ -194,6 +238,55 @@ defmodule StellarTel.Handler do
 
       {:error, reason} ->
         Logger.error("route=stellartel Databse error: #{inspect(reason)}")
+        :internal_error
+    end
+  end
+
+  def handle_journal(:docked, event) do
+    station_insert_query = """
+    INSERT INTO stations (
+      system_id,
+      name,
+      type_id,
+      small_landing_pads,
+      medium_landing_pads,
+      large_landing_pads,
+      government_type_id
+    ) VALUES ($1::int, $2::text, $3::int, $4::int, $5::int, $6::int, $7::int)
+    """
+
+    case Postgrex.transaction(StellarTel.Postgres, fn conn ->
+           station_type_id =
+             case get_or_create_id(conn, "station_types", event["StationType"]) do
+               {:error, reason} -> Postgrex.rollback(conn, reason)
+               id -> id
+             end
+
+           government_type_id =
+             case get_or_create_id(conn, "government_types", event["StationGovernment_Localised"]) do
+               {:error, reason} -> Postgrex.rollback(conn, reason)
+               id -> id
+             end
+
+           Postgrex.query!(
+             conn,
+             station_insert_query,
+             [
+               event["SystemAddress"],
+               event["StationName"],
+               station_type_id,
+               event["LandingPads"]["Small"],
+               event["LandingPads"]["Medium"],
+               event["LandingPads"]["Large"],
+               government_type_id
+             ]
+           )
+         end) do
+      {:ok, _result} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("route=stellartel Database error: #{inspect(reason)}")
         :internal_error
     end
   end
@@ -220,7 +313,6 @@ defmodule StellarTel.Handler do
         id
 
       {:error, reason} ->
-        Logger.error("route=stellartel Could not get id from #{table_name}: #{reason}")
         {:error, reason}
     end
   end
