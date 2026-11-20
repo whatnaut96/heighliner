@@ -1,4 +1,3 @@
-# TODO: Pattern matching on id fetches
 defmodule StellarTel.Handler do
   require Logger
 
