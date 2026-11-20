@@ -252,7 +252,7 @@ defmodule StellarTel.Handler do
       medium_landing_pads,
       large_landing_pads,
       government_type_id
-    ) VALUES ($1::int, $2::text, $3::int, $4::int, $5::int, $6::int, $7::int)
+    ) VALUES ($1::bigint, $2::text, $3::int, $4::int, $5::int, $6::int, $7::int)
     """
 
     case Postgrex.transaction(StellarTel.Postgres, fn conn ->
@@ -268,18 +268,20 @@ defmodule StellarTel.Handler do
                id -> id
              end
 
+           query_vals = [
+             event["SystemAddress"],
+             event["StationName"],
+             station_type_id,
+             event["LandingPads"]["Small"],
+             event["LandingPads"]["Medium"],
+             event["LandingPads"]["Large"],
+             government_type_id
+           ]
+
            Postgrex.query!(
              conn,
              station_insert_query,
-             [
-               event["SystemAddress"],
-               event["StationName"],
-               station_type_id,
-               event["LandingPads"]["Small"],
-               event["LandingPads"]["Medium"],
-               event["LandingPads"]["Large"],
-               government_type_id
-             ]
+             query_vals
            )
          end) do
       {:ok, _result} ->
