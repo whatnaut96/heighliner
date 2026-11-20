@@ -129,7 +129,7 @@ CREATE TABLE station_economy_bridge(
 );
 
 CREATE TABLE station_markets(
-    id BIGINT PRIMARY KEY,
+    id BIGINT NOT NULL,
     station_id INT NOT NULL REFERENCES stations(id),
     commodity_id INT NOT NULL REFERENCES commodities(id),
     faction_id INT NOT NULL REFERENCES factions(id),
@@ -143,7 +143,8 @@ CREATE TABLE station_markets(
     consumer BOOLEAN NOT NULL,
     producer BOOLEAN NOT NULL,
     rare BOOLEAN NOT NULL,
-    last_updated bigint not null
+    last_updated bigint not null,
+    PRIMARY KEY(id, commodity_id)
 );
 
 CREATE TABLE faction_system_bridge(
