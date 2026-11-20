@@ -7,8 +7,10 @@ defmodule Heighliner.Plug do
   plug(:dispatch)
 
   get "/health" do
-    # TODO: Health checks
-    send_resp(conn, 200, "")
+    case Postgrex.query(StellarTel.Postgres, "SELECT 1", []) do
+      {:ok, _} -> send_resp(conn, 200, "All health checks passed")
+      {:error, reason} -> send_resp(conn, 503, "#{inspect(reason)}")
+    end
   end
 
   post "/stellartel" do
@@ -60,7 +62,11 @@ defmodule Heighliner.Plug do
     end
   end
 
-  def read_full_body(conn, acc \\ "") do
+  match _ do
+    send_resp(conn, 404, "not found")
+  end
+
+  defp read_full_body(conn, acc \\ "") do
     case Plug.Conn.read_body(conn) do
       {:ok, body, conn} ->
         {:ok, acc <> body, conn}
