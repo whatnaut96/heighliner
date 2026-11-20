@@ -32,6 +32,13 @@ defmodule Heighliner.Plug do
 
           :internal_error ->
             send_resp(conn, 500, "internal error")
+
+          {:error, :malformed_payload} ->
+            send_resp(
+              conn,
+              400,
+              "The provided payload does not match the expected shape for the type #{event["event"]}"
+            )
         end
 
       {:error, reason} ->

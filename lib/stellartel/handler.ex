@@ -293,6 +293,165 @@ defmodule StellarTel.Handler do
     end
   end
 
+  def handle_journal(:market, event) do
+    if event["Items"] == nil do
+      {:error, :malformed_payload}
+    else
+      case Postgrex.transaction(StellarTel.Postgres, fn conn ->
+             market_id = event["MarketID"]
+             items = event["Items"]
+
+             {station_id, faction_id} =
+               case Postgrex.query(
+                      conn,
+                      """
+                      SELECT stations.id, faction_system_bridge.faction_id
+                      FROM stations
+                      JOIN systems ON systems.id = stations.system_id
+                      JOIN faction_system_bridge
+                        ON faction_system_bridge.system_id = systems.id
+                        AND faction_system_bridge.in_control = TRUE
+                      WHERE stations.name = $1 AND systems.name = $2
+                      ORDER BY faction_system_bridge.last_updated DESC
+                      LIMIT 1
+                      """,
+                      [event["StationName"], event["StarSystem"]]
+                    ) do
+                 {:ok, %Postgrex.Result{rows: [[station_id, faction_id]]}} ->
+                   {station_id, faction_id}
+
+                 {:ok, %Postgrex.Result{rows: []}} ->
+                   Postgrex.rollback(conn, :station_or_controlling_faction_not_found)
+
+                 {:error, reason} ->
+                   Postgrex.rollback(conn, reason)
+               end
+
+             category_ids =
+               items
+               |> Enum.map(& &1["Category_Localised"])
+               |> Enum.uniq()
+               |> Map.new(fn category_name ->
+                 category_id =
+                   case get_or_create_id(conn, "commodity_categories", category_name) do
+                     {:error, reason} -> Postgrex.rollback(conn, reason)
+                     id -> id
+                   end
+
+                 {category_name, category_id}
+               end)
+
+             prepared_items =
+               Enum.map(items, fn item ->
+                 category_id = Map.fetch!(category_ids, item["Category_Localised"])
+
+                 commodity_id =
+                   case get_or_create_commodity_id(
+                          conn,
+                          item["Name_Localised"],
+                          category_id
+                        ) do
+                     {:error, reason} -> Postgrex.rollback(conn, reason)
+                     id -> id
+                   end
+
+                 %{
+                   id: market_id,
+                   commodity_id: commodity_id,
+                   buy_price: item["BuyPrice"],
+                   sell_price: item["SellPrice"],
+                   mean_price: item["MeanPrice"],
+                   stock_bracket: item["StockBracket"],
+                   demand_bracket: item["DemandBracket"],
+                   stock: item["Stock"],
+                   demand: item["Demand"],
+                   consumer: item["Consumer"],
+                   producer: item["Producer"],
+                   rare: item["Rare"]
+                 }
+               end)
+
+             station_market_upsert_query = """
+             INSERT INTO station_markets (
+               id,
+               station_id,
+               commodity_id,
+               faction_id,
+               buy_price,
+               sell_price,
+               mean_price,
+               stock_bracket,
+               demand_bracket,
+               stock,
+               demand,
+               consumer,
+               producer,
+               rare,
+               last_updated
+             )
+             SELECT
+               item.id,
+               $2::int,
+               item.commodity_id,
+               $3::int,
+               item.buy_price,
+               item.sell_price,
+               item.mean_price,
+               item.stock_bracket,
+               item.demand_bracket,
+               item.stock,
+               item.demand,
+               item.consumer,
+               item.producer,
+               item.rare,
+               $4::bigint
+             FROM jsonb_to_recordset($1::jsonb) AS item (
+               id bigint,
+               commodity_id int,
+               buy_price int,
+               sell_price int,
+               mean_price int,
+               stock_bracket int,
+               demand_bracket int,
+               stock int,
+               demand int,
+               consumer boolean,
+               producer boolean,
+               rare boolean
+             )
+             ON CONFLICT (id, commodity_id) DO UPDATE SET
+               station_id = EXCLUDED.station_id,
+               faction_id = EXCLUDED.faction_id,
+               buy_price = EXCLUDED.buy_price,
+               sell_price = EXCLUDED.sell_price,
+               mean_price = EXCLUDED.mean_price,
+               stock_bracket = EXCLUDED.stock_bracket,
+               demand_bracket = EXCLUDED.demand_bracket,
+               stock = EXCLUDED.stock,
+               demand = EXCLUDED.demand,
+               consumer = EXCLUDED.consumer,
+               producer = EXCLUDED.producer,
+               rare = EXCLUDED.rare,
+               last_updated = EXCLUDED.last_updated
+             """
+
+             Postgrex.query!(conn, station_market_upsert_query, [
+               prepared_items,
+               station_id,
+               faction_id,
+               System.system_time(:millisecond)
+             ])
+           end) do
+        {:ok, _result} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error("route=stellartel Database error: #{inspect(reason)}")
+          :internal_error
+      end
+    end
+  end
+
   def handle_journal(unknown_event_type, _event) do
     Logger.info("received an event that is not yet supported: #{unknown_event_type}")
     {:error, :event_type_not_supported}
@@ -305,7 +464,7 @@ defmodule StellarTel.Handler do
         INSERT INTO #{table_name} (name) VALUES ($1)
         ON CONFLICT (name) DO NOTHING
         RETURNING id
-      ) SELECT ID from #{table_name}_ins UNION ALL
+      ) SELECT id from #{table_name}_ins UNION ALL
       SELECT id FROM #{table_name}
       WHERE name = $1;
       """
@@ -316,6 +475,20 @@ defmodule StellarTel.Handler do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp get_or_create_commodity_id(pg_conn, name, category_id) do
+    query = """
+    INSERT INTO commodities (name, category_id)
+    VALUES ($1, $2)
+    ON CONFLICT (name) DO UPDATE SET category_id = EXCLUDED.category_id
+    RETURNING id
+    """
+
+    case Postgrex.query(pg_conn, query, [name, category_id]) do
+      {:ok, %Postgrex.Result{rows: [[id]]}} -> id
+      {:error, reason} -> {:error, reason}
     end
   end
 end
