@@ -3,25 +3,6 @@ defmodule StellarTel.Handler do
 
   def handle_journal(:fsdjump, event) do
     case Postgrex.transaction(StellarTel.Postgres, fn conn ->
-           system_upsert_query = """
-             INSERT INTO systems values (
-               $1,
-               ST_SetSRID(ST_MakePoint($2, $3, $4), 0),
-               $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-             ) ON CONFLICT (id)
-               DO UPDATE SET
-                id = EXCLUDED.id,
-                allegiance_id = EXCLUDED.allegiance_id,
-                primary_economy_id = EXCLUDED.primary_economy_id,
-                secondary_economy_id = EXCLUDED.secondary_economy_id,
-                government_id = EXCLUDED.government_id,
-                population = EXCLUDED.population,
-                controlling_power_id = EXCLUDED.controlling_power_id,
-                power_play_state_id = EXCLUDED.power_play_state_id,
-                conflicts = EXCLUDED.conflicts,
-                last_updated = EXCLUDED.last_updated
-           """
-
            allegiance_id =
              case get_or_create_id(conn, "allegiances", event["SystemAllegiance"]) do
                {:error, reason} ->
@@ -69,27 +50,64 @@ defmodule StellarTel.Handler do
 
            [star_pos_x, star_pos_y, star_pos_z] = event["StarPos"]
 
-           Postgrex.query!(
-             conn,
-             system_upsert_query,
-             [
-               event["SystemAddress"],
-               star_pos_x,
-               star_pos_y,
-               star_pos_z,
-               event["Body"],
-               allegiance_id,
-               primary_economy_id,
-               secondary_economy_id,
-               government_id,
-               body_type_id,
-               event["Population"],
-               controlling_power_id,
-               powerplay_state_id,
-               JSON.encode!(event["Conflicts"]),
-               System.system_time(:millisecond)
-             ]
-           )
+           system_upsert_query = """
+           INSERT INTO systems (
+             id,
+             star_position,
+             name,
+             allegiance_id,
+             primary_economy_id,
+             secondary_economy_id,
+             government_id,
+             body_type_id,
+             population,
+             controlling_power_id,
+             powerplay_state_id,
+             conflicts,
+             last_updated
+           ) VALUES (
+               $1::bigint,
+               ST_SetSRID(ST_MakePoint($2, $3, $4), 0),
+                $5::text, $6::int, $7::int, $8::int, $9::int,
+                $10::int, $11::int, $12::int, $13::int, $14::jsonb,
+                $15::bigint
+             ) ON CONFLICT (id)
+               DO UPDATE SET
+                allegiance_id = EXCLUDED.allegiance_id,
+                primary_economy_id = EXCLUDED.primary_economy_id,
+                secondary_economy_id = EXCLUDED.secondary_economy_id,
+                government_id = EXCLUDED.government_id,
+                population = EXCLUDED.population,
+                controlling_power_id = EXCLUDED.controlling_power_id,
+                powerplay_state_id = EXCLUDED.powerplay_state_id,
+                conflicts = EXCLUDED.conflicts,
+                last_updated = EXCLUDED.last_updated
+           """
+
+           case Postgrex.query(
+                  conn,
+                  system_upsert_query,
+                  [
+                    event["SystemAddress"],
+                    star_pos_x,
+                    star_pos_y,
+                    star_pos_z,
+                    event["StarSystem"],
+                    allegiance_id,
+                    primary_economy_id,
+                    secondary_economy_id,
+                    government_id,
+                    body_type_id,
+                    event["Population"],
+                    controlling_power_id,
+                    powerplay_state_id,
+                    event["Conflicts"],
+                    System.system_time(:millisecond)
+                  ]
+                ) do
+             {:ok, _result} -> :ok
+             {:error, reason} -> Postgrex.rollback(conn, reason)
+           end
 
            power_ids =
              event["Powers"]
