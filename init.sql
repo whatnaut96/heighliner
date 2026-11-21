@@ -80,7 +80,7 @@ CREATE TABLE systems (
     body_type_id INT NOT NULL REFERENCES body_types(id),
     population INT NOT NULL,
     controlling_power_id INT NOT NULL REFERENCES powers(id),
-    power_play_state_id INT NOT NULL REFERENCES powerplay_states(id),
+    powerplay_state_id INT NOT NULL REFERENCES powerplay_states(id),
     conflicts jsonb NOT NULL,
     last_updated bigint NOT NULL,
     UNIQUE(id, name)
