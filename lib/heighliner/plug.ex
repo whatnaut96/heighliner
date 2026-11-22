@@ -50,15 +50,49 @@ defmodule Heighliner.Plug do
   end
 
   post "/synco" do
-    payload_atom =
-      Plug.Conn.Query.decode(conn.query_string)["type"]
-      |> String.to_atom()
+    payload_type =
+      Plug.Conn.Query.decode(conn.query_string)["type"] || "unknown"
 
     case read_full_body(conn) do
       {:ok, body, conn} ->
-        case Synco.Handler.handle_payload(payload_atom, body) do
-          :ok -> send_resp(conn, 200, "foo")
-        end
+        chunk_size = 5 * 1024 * 1024
+
+        payload_stream =
+          Stream.resource(
+            fn -> 0 end,
+            fn
+              offset when offset >= byte_size(body) ->
+                {:halt, offset}
+
+              offset ->
+                len = min(chunk_size, byte_size(body) - offset)
+                {[binary_part(body, offset, len)], offset + len}
+            end,
+            fn _ -> :ok end
+          )
+
+        payload_hash =
+          :crypto.hash(:sha256, body)
+          |> Base.encode16(case: :lower)
+
+        synco_path = Application.get_env(:heighliner, :synco_path)
+        hashed_file_name = "#{payload_hash}.json"
+        payload_type_path = "#{synco_path}/#{payload_type}"
+        File.mkdir_p!(payload_type_path)
+
+        payload_write_path = "#{payload_type_path}/#{hashed_file_name}"
+        file = File.open!(payload_write_path, [:write])
+
+        payload_stream
+        |> Stream.chunk_every(1000)
+        |> Enum.reduce(file, fn chunk, acc_file ->
+          :ok = IO.write(acc_file, chunk)
+          acc_file
+        end)
+
+        File.close(file)
+        # send message to consumer
+        send_resp(conn, 202, "")
     end
   end
 
