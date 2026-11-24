@@ -55,44 +55,27 @@ defmodule Heighliner.Plug do
 
     case read_full_body(conn) do
       {:ok, body, conn} ->
-        chunk_size = 5 * 1024 * 1024
+        result =
+          case Postgrex.transaction(Synco.Postgres, fn pg_conn ->
+                 case Postgrex.query(
+                        pg_conn,
+                        "INSERT INTO synco_snapshots(snapshot_type, snapshot) VALUES ($1, $2)",
+                        [payload_type, body]
+                      ) do
+                   {:ok, _result} ->
+                     nil
 
-        payload_stream =
-          Stream.resource(
-            fn -> 0 end,
-            fn
-              offset when offset >= byte_size(body) ->
-                {:halt, offset}
+                   {:error, reason} ->
+                     Logger.error(
+                       "route=synco payload_type=#{payload_type} failed to insert a synco payload: #{inspect(reason)}"
+                     )
 
-              offset ->
-                len = min(chunk_size, byte_size(body) - offset)
-                {[binary_part(body, offset, len)], offset + len}
-            end,
-            fn _ -> :ok end
-          )
-
-        payload_hash =
-          :crypto.hash(:sha256, body)
-          |> Base.encode16(case: :lower)
-
-        synco_path = Application.get_env(:heighliner, :synco_path)
-        hashed_file_name = "#{payload_hash}.json"
-        payload_type_path = "#{synco_path}/#{payload_type}"
-        File.mkdir_p!(payload_type_path)
-
-        payload_write_path = "#{payload_type_path}/#{hashed_file_name}"
-        file = File.open!(payload_write_path, [:write])
-
-        payload_stream
-        |> Stream.chunk_every(1000)
-        |> Enum.reduce(file, fn chunk, acc_file ->
-          :ok = IO.write(acc_file, chunk)
-          acc_file
-        end)
-
-        File.close(file)
-        # send message to consumer
-        send_resp(conn, 202, "")
+                     Postgrex.rollback(pg_conn, reason)
+                 end
+               end) do
+            {:ok, _} -> send_resp(conn, 200, "")
+            {:error} -> send_resp(conn, 400, "")
+          end
     end
   end
 
