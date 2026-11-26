@@ -16,7 +16,7 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = [
-            beamPkgs.elixir_1_20
+            pkgs.gleam
             beamPkgs.erlang
             pkgs.rebar3
           ];
