@@ -20,25 +20,33 @@ import synco/handler.{handle_synco_request}
 import utils/dotenv
 import utils/logging
 
+const ok_code = 200
+
+const not_found_code = 404
+
+const bad_request_code = 400
+
+const method_not_supported_code = 501
+
 fn heighliner_http_server_setup(
   _stellartel_db_pool: pog.Connection,
   synco_db_pool: pog.Connection,
   req: Request(Connection),
 ) -> Response(ResponseData) {
   let not_found =
-    response.new(404)
+    response.new(not_found_code)
     |> response.set_body(
       mist.Bytes(bytes_tree.from_string("not a valid endpoint")),
     )
 
   let not_supported =
-    response.new(501)
+    response.new(method_not_supported_code)
     |> response.set_body(
       mist.Bytes(bytes_tree.from_string("method not supported")),
     )
 
   let bad_request =
-    response.new(400)
+    response.new(bad_request_code)
     |> response.set_body(mist.Bytes(bytes_tree.from_string("invalid request")))
 
   case request.path_segments(req) {
@@ -50,7 +58,7 @@ fn heighliner_http_server_setup(
               case do_handle_stream(consume, <<>>) {
                 Ok(_body) -> {
                   // send to stellartel handler
-                  response.new(200)
+                  response.new(ok_code)
                   |> response.set_body(
                     mist.Bytes(bytes_tree.from_string("payload accepted")),
                   )
