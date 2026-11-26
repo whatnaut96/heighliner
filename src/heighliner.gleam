@@ -81,9 +81,6 @@ fn heighliner_http_server_setup(
             }
           }
         }
-        _ -> {
-          not_supported
-        }
       }
     }
 
