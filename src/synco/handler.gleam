@@ -1,10 +1,10 @@
 import gleam/bytes_tree
 import gleam/http/response.{type Response}
 import gleam/list
-import gleam/result
 import gleam/set
 import mist.{type ResponseData}
 import pog
+import utils/responses
 
 const synco_insert_query: String = "INSERT INTO synco_snapshots(snapshot_type, snapshot) VALUES ($1, $2)"
 
@@ -35,23 +35,19 @@ pub fn handle_synco_request(
             |> pog.execute(synco_db_pool)
           {
             Ok(_) -> {
-              response.new(200)
+              response.new(responses.ok_code)
               |> response.set_body(mist.Bytes(bytes_tree.new()))
             }
             Error(_) -> {
-              response.new(501)
-              |> response.set_body(mist.Bytes(bytes_tree.new()))
+              responses.internal_error("failed to execute internal query")
             }
           }
         }
-        False ->
-          response.new(400)
-          |> response.set_body(mist.Bytes(bytes_tree.new()))
+        False -> responses.bad_request()
       }
     }
     Error(_) -> {
-      response.new(400)
-      |> response.set_body(mist.Bytes(bytes_tree.new()))
+      responses.bad_request()
     }
   }
 }
