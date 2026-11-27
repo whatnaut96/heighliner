@@ -1,6 +1,5 @@
 // TODO: Consider magic number removal across the board
 // TODO: Consider following some of the NASA power of 10 rules
-// TODO: Stellartel handling
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/erlang/process
@@ -16,33 +15,58 @@ import gleam/result
 import gleam/string
 import mist.{type Connection, type ResponseData}
 import pog
+import stellartel/handler as stellartel
 import synco/handler.{handle_synco_request}
 import utils/dotenv
 import utils/logging
 import utils/responses
 
 fn heighliner_http_server_setup(
-  _stellartel_db_pool: pog.Connection,
+  stellartel_db_pool: pog.Connection,
   synco_db_pool: pog.Connection,
   req: Request(Connection),
 ) -> Response(ResponseData) {
   case request.path_segments(req) {
     ["stellartel"] -> {
-      case http.Post {
+      case req.method {
         http.Post -> {
           case mist.stream(req) {
             Ok(consume) -> {
-              case do_handle_stream(consume, <<>>) {
-                Ok(_body) -> {
-                  // send to stellartel handler
-                  response.new(responses.ok_code)
-                  |> response.set_body(
-                    mist.Bytes(bytes_tree.from_string("payload accepted")),
-                  )
-                }
+              case
+                do_handle_stream(consume, <<>>)
+                |> result.try(bit_array.to_string)
+              {
+                Ok(body) ->
+                  case
+                    stellartel.handle_stellartel_request(
+                      body,
+                      stellartel_db_pool,
+                    )
+                  {
+                    Ok(Nil) -> {
+                      response.new(responses.ok_code)
+                      |> response.set_body(
+                        mist.Bytes(bytes_tree.from_string(
+                          "journal processed successfully",
+                        )),
+                      )
+                    }
+                    Error(stellartel.MalformedPayload) ->
+                      responses.bad_request()
+                    Error(stellartel.EventTypeNotSupported) -> {
+                      response.new(423)
+                      |> response.set_body(
+                        mist.Bytes(bytes_tree.from_string(
+                          "event type not supported",
+                        )),
+                      )
+                    }
+                    Error(stellartel.InternalError) ->
+                      responses.internal_error("internal error")
+                  }
                 Error(reason) -> {
                   logging.error(
-                    "failed to read the body route=synco error="
+                    "failed to read the body route=stellartel error="
                     <> string.inspect(reason),
                   )
                   responses.bad_request()
@@ -58,6 +82,7 @@ fn heighliner_http_server_setup(
             }
           }
         }
+        _ -> responses.not_supported()
       }
     }
 
@@ -139,56 +164,56 @@ fn build_mist_supervisor(
 fn build_stellartel_db_pool(
   stellartel_db_pool_proc_name: process.Name(pog.Message),
 ) {
-  let stellartel_db_host = case dotenv.get_env("SYNCO_DB_HOST") {
+  let stellartel_db_host = case dotenv.get_env("STELLARTEL_DB_HOST") {
     Ok(v) -> v
     Error(_) -> "localhost"
   }
 
-  let stellartel_db_port = case dotenv.get_env("SYNCO_DB_PORT") {
+  let stellartel_db_port = case dotenv.get_env("STELLARTEL_DB_PORT") {
     Ok(v) -> {
       case int.parse(v) {
         Ok(port) -> port
         Error(_) ->
-          panic as "failed to parse the SYNCO_DB_PORT value as an integer"
+          panic as "failed to parse the STELLARTEL_DB_PORT value as an integer"
       }
     }
     Error(_) -> {
-      logging.warning("SYNCO_DB_PORT not set. defaulting to 5432")
+      logging.warning("STELLARTEL_DB_PORT not set. defaulting to 5432")
       5432
     }
   }
 
-  let stellartel_db_user = case dotenv.get_env("SYNCO_DB_USER") {
+  let stellartel_db_user = case dotenv.get_env("STELLARTEL_DB_USER") {
     Ok(v) -> v
-    Error(_) -> panic as "no SYNCO_DB_USER set"
+    Error(_) -> panic as "no STELLARTEL_DB_USER set"
   }
 
-  let stellartel_db_password = case dotenv.get_env("SYNCO_DB_PASSWORD") {
+  let stellartel_db_password = case dotenv.get_env("STELLARTEL_DB_PASSWORD") {
     Ok(v) -> option.Some(v)
     Error(_) -> {
-      logging.warning("no SYNCO_DB_PASSWORD set. defaulting to nil")
+      logging.warning("no STELLARTEL_DB_PASSWORD set. defaulting to nil")
       option.None
     }
   }
 
-  let stellartel_db_database = case dotenv.get_env("SYNCO_DB_DATABASE") {
+  let stellartel_db_database = case dotenv.get_env("STELLARTEL_DB_DATABASE") {
     Ok(v) -> v
     Error(_) -> {
-      panic as "no SYNCO_DB_DATABASE set"
+      panic as "no STELLARTEL_DB_DATABASE set"
     }
   }
 
-  let stellartel_db_pool_size = case dotenv.get_env("SYNCO_DB_POOL_SIZE") {
+  let stellartel_db_pool_size = case dotenv.get_env("STELLARTEL_DB_POOL_SIZE") {
     Ok(v) -> {
       case int.parse(v) {
         Ok(pool_size) -> pool_size
         Error(_) ->
-          panic as "failed to parse the SYNCO_DB_POOL_SIZE value as an integer"
+          panic as "failed to parse the STELLARTEL_DB_POOL_SIZE value as an integer"
       }
     }
     Error(_) -> {
       logging.warning(
-        "SYNCO_DB_POOL_SIZE not set. using default of 10 connections",
+        "STELLARTEL_DB_POOL_SIZE not set. using default of 10 connections",
       )
       10
     }

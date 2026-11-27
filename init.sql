@@ -1,4 +1,5 @@
 create database stellartel;
+create database synco;
 \connect stellartel
 
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -154,3 +155,14 @@ CREATE TABLE faction_system_bridge(
     in_control BOOLEAN NOT NULL,
     last_updated bigint NOT NULL
 );
+
+\connect synco
+
+create type synco_snapshot_type as enum('economy', 'buildings', 'citizens', 'roads', 'production', 'resources');
+
+create table synco_snapshots(
+    id serial primary key,
+    snapshot_type synco_snapshot_type not null,    
+    snapshot jsonb not null
+);
+
