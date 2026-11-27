@@ -7,7 +7,6 @@ import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
-import gleam/io
 import gleam/option
 import gleam/otp/static_supervisor.{type Supervisor} as supervisor
 import gleam/otp/supervision
@@ -301,7 +300,6 @@ fn build_synco_db_pool(synco_db_pool_proc_name: process.Name(pog.Message)) {
 
 pub fn main() {
   let worked = dotenv.load_dotenv(option.Some("envs/.env"))
-  io.println(string.inspect(worked))
   case worked {
     True -> {
       let synco_db_pool_proc_name = process.new_name("SyncoPostgres")
