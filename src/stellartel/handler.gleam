@@ -752,14 +752,14 @@ fn faction_decoder() -> decode.Decoder(Faction) {
   use reputation <- decode.optional_field(
     "MyReputation",
     0.0,
-    numeric_decoder(),
+    decode.one_of(decode.float, [decode.map(decode.int, int.to_float)]),
   )
   use name <- decode.field("Name", decode.string)
   use faction_state <- decode.field("FactionState", decode.string)
   use active_states <- decode.optional_field(
     "ActiveStates",
     [],
-    decode.list(active_state_decoder()),
+    decode.list(decode.field("State", decode.string, decode.success)),
   )
   let state = case active_states {
     [state, ..] if state != "" -> state
@@ -841,13 +841,13 @@ fn market_item_decoder() -> decode.Decoder(MarketItem) {
 }
 
 fn star_position_decoder() -> decode.Decoder(#(Float, Float, Float)) {
-  use values <- decode.then(decode.list(numeric_decoder()))
+  use values <- decode.then(
+    decode.list(
+      decode.one_of(decode.float, [decode.map(decode.int, int.to_float)]),
+    ),
+  )
   case values {
     [x, y, z] -> decode.success(#(x, y, z))
     _ -> decode.failure(#(0.0, 0.0, 0.0), "three coordinates")
   }
-}
-
-fn numeric_decoder() -> decode.Decoder(Float) {
-  decode.one_of(decode.float, [decode.map(decode.int, int.to_float)])
 }
