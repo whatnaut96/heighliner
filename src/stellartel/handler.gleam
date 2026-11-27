@@ -775,10 +775,6 @@ fn faction_decoder() -> decode.Decoder(Faction) {
   ))
 }
 
-fn active_state_decoder() -> decode.Decoder(String) {
-  decode.field("State", decode.string, decode.success)
-}
-
 fn docked_decoder() -> decode.Decoder(DockedEvent) {
   use system_address <- decode.field("SystemAddress", decode.int)
   use station_name <- decode.field("StationName", decode.string)
